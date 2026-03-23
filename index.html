@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bharat Shield | Smart Red Alert Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111f;
+      --line: rgba(255,255,255,0.12);
+      --text: #ecf2ff;
+      --muted: #9db1d4;
+      --alert: #ff4d4f;
+      --alert-soft: rgba(255,77,79,0.12);
+      --alert-glow: rgba(255, 77, 79, 0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top, rgba(51, 84, 138, 0.32), transparent 36%),
+        linear-gradient(180deg, #060d18 0%, #08111f 50%, #040914 100%);
+    }
+    .glass {
+      background: linear-gradient(180deg, rgba(19, 33, 54, 0.92), rgba(10, 19, 32, 0.96));
+      border: 1px solid var(--line);
+      box-shadow: 0 18px 48px rgba(0,0,0,0.28);
+      backdrop-filter: blur(14px);
+    }
+    .grid-pattern {
+      background-image:
+        linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+      background-size: 34px 34px;
+    }
+    .pulse-ring::after {
+      content: '';
+      position: absolute;
+      inset: -8px;
+      border-radius: inherit;
+      border: 2px solid rgba(255, 77, 79, 0.28);
+      animation: ring 1.8s ease-out infinite;
+    }
+    @keyframes ring {
+      from { transform: scale(0.94); opacity: 1; }
+      to { transform: scale(1.12); opacity: 0; }
+    }
+    .ticker { overflow: hidden; white-space: nowrap; }
+    .ticker span { display: inline-block; padding-left: 100%; animation: scroll 18s linear infinite; }
+    @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+    .alert-screen {
+      position: fixed;
+      inset: 0;
+      display: none;
+      z-index: 100;
+      background: radial-gradient(circle at center, rgba(135,0,0,0.28), rgba(5,10,18,0.97));
+      backdrop-filter: blur(10px);
+    }
+    body.alert-live .alert-screen { display: flex; }
+    body.alert-live .alert-emphasis {
+      border-color: rgba(255,77,79,0.55);
+      box-shadow: 0 0 0 1px rgba(255,77,79,0.15), 0 0 30px var(--alert-glow);
+    }
+    body.alert-live .flash-alert { animation: flashBg 0.45s infinite alternate; }
+    @keyframes flashBg { from { box-shadow: 0 0 0 1px rgba(255,77,79,0.15), 0 0 24px rgba(255,77,79,0.18); } to { box-shadow: 0 0 0 1px rgba(255,77,79,0.35), 0 0 44px rgba(255,77,79,0.42); } }
+    #map { height: 100%; min-height: 440px; border-radius: 24px; }
+    .leaflet-container { background: #0a1425; }
+    .alert-marker {
+      width: 18px; height: 18px; border-radius: 999px; background: #ff4d4f; border: 3px solid rgba(255,255,255,0.9);
+      box-shadow: 0 0 0 10px rgba(255,77,79,0.15), 0 0 24px rgba(255,77,79,0.65);
+      animation: blinkAlert 0.9s infinite alternate;
+    }
+    .user-marker {
+      width: 18px; height: 18px; border-radius: 999px; background: #38bdf8; border: 3px solid rgba(255,255,255,0.9);
+      box-shadow: 0 0 0 10px rgba(56,189,248,0.14), 0 0 24px rgba(56,189,248,0.55);
+    }
+    .incident-marker {
+      width: 14px; height: 14px; border-radius: 999px; background: #f59e0b; border: 2px solid rgba(255,255,255,0.85);
+    }
+    .safe-marker {
+      width: 14px; height: 14px; border-radius: 999px; background: #34d399; border: 2px solid rgba(255,255,255,0.85);
+    }
+    @keyframes blinkAlert { from { transform: scale(0.95); opacity: 0.7; } to { transform: scale(1.12); opacity: 1; } }
+    body.light-mode { background: linear-gradient(180deg, #f6f8fc 0%, #e9eef7 100%); color: #0f172a; }
+    body.light-mode .glass { background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(240,244,252,0.95)); border-color: rgba(15,23,42,0.08); color: #0f172a; }
+    body.light-mode .text-slate-300, body.light-mode .text-slate-400, body.light-mode .text-slate-500 { color: #475569 !important; }
+    body.light-mode .bg-slate-950\/60, body.light-mode .bg-slate-950\/70, body.light-mode .bg-slate-950\/55, body.light-mode .bg-slate-900\/65 { background: rgba(241,245,249,0.92) !important; color: #0f172a; }
+    body.light-mode .border-white\/10, body.light-mode .border-white\/15 { border-color: rgba(15,23,42,0.1) !important; }
+  </style>
+</head>
+<body>
+  <div class="min-h-screen">
+    <header class="sticky top-0 z-40 border-b border-white/10 bg-slate-950/85 backdrop-blur-xl">
+      <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+        <div class="flex items-center gap-4">
+          <div class="pulse-ring relative flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/20 text-3xl">🚨</div>
+          <div>
+            <p id="brandTagline" class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">AI safety watch demo</p>
+            <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">Bharat Shield</h1>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">
+            <span id="languageLabel" class="mr-2">Language</span>
+            <select id="languageSelect" class="bg-transparent text-sm font-semibold outline-none">
+              <option value="en">English</option>
+              <option value="hi">हिन्दी</option>
+              <option value="mr">मराठी</option>
+              <option value="he">עברית</option>
+            </select>
+          </label>
+          <label class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">
+            <span class="mr-2">Theme</span>
+            <input id="themeToggle" type="checkbox" class="accent-red-500" checked />
+          </label>
+          <label class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">
+            <span id="watchModeLabel" class="mr-2">Watch mode</span>
+            <input id="watchModeToggle" type="checkbox" class="accent-red-500" checked />
+          </label>
+          <label class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">
+            <span id="pushToggleLabel" class="mr-2">Alerts</span>
+            <input id="notificationToggle" type="checkbox" class="accent-red-500" checked />
+          </label>
+          <label class="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">
+            <span id="networkModeLabel" class="mr-2">Low network</span>
+            <input id="networkModeToggle" type="checkbox" class="accent-red-500" />
+          </label>
+          <div class="alert-emphasis flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+            <div class="h-3 w-3 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(51,209,122,0.9)]"></div>
+            <div>
+              <p id="systemStatusLabel" class="text-xs uppercase tracking-[0.25em] text-slate-400">System status</p>
+              <p id="systemStatus" class="text-sm font-semibold text-emerald-300">Routine monitoring</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ticker border-t border-red-500/20 bg-red-500/10 py-2 text-xs font-medium uppercase tracking-[0.28em] text-red-100">
+        <span id="tickerText">Smart map • live user tracking • clustered incidents • AI alerts • red alert marker • push-style browser notifications</span>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <section class="alert-emphasis grid-pattern glass relative overflow-hidden rounded-[30px] border p-6 sm:p-8 lg:p-10 flash-alert">
+        <div class="absolute right-0 top-0 h-64 w-64 rounded-full bg-red-500/10 blur-3xl"></div>
+        <div class="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+          <div class="space-y-6">
+            <div id="heroChip" class="alert-emphasis inline-flex items-center gap-2 rounded-full border border-red-400/30 bg-red-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.32em] text-red-200">AI live watch + red alert</div>
+            <div>
+              <p id="heroEyebrow" class="mb-3 text-sm font-semibold uppercase tracking-[0.35em] text-slate-400">Real-time safety dashboard</p>
+              <h2 id="heroTitle" class="max-w-3xl text-4xl font-extrabold tracking-tight sm:text-5xl">Interactive map, AI monitoring, and emergency alerts in one screen.</h2>
+            </div>
+            <p id="heroDescription" class="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">Track location, cluster nearby incidents, switch on watch mode, and send red-alert SMS actions from the same interface.</p>
+            <div class="grid gap-4 sm:grid-cols-4">
+              <div class="glass rounded-2xl p-4">
+                <p id="locationLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Current location</p>
+                <p id="cityName" class="mt-3 text-xl font-bold">Nagpur</p>
+                <p id="locationText" class="mt-1 text-sm text-slate-300">21.15°N, 79.09°E</p>
+              </div>
+              <div class="glass rounded-2xl p-4">
+                <p id="timeLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Local time</p>
+                <p id="currentTime" class="mt-3 text-xl font-bold">00:00:00 IST</p>
+                <p class="mt-1 text-sm text-slate-300">Asia/Kolkata</p>
+              </div>
+              <div class="glass rounded-2xl p-4">
+                <p id="alertStateLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Alert state</p>
+                <p id="alertState" class="mt-3 text-xl font-bold text-emerald-300">No active warning</p>
+                <p id="alertStateHint" class="mt-1 text-sm text-slate-300">Routine monitoring active</p>
+              </div>
+              <div class="glass rounded-2xl p-4">
+                <p id="smsModeLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">AI insight</p>
+                <p id="smsModeTitle" class="mt-3 text-xl font-bold text-amber-200">Monitoring</p>
+                <p id="smsModeHint" class="mt-1 text-sm text-slate-300">Safe route suggestions ready</p>
+              </div>
+              <div class="glass rounded-2xl p-4 sm:col-span-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p id="nearbyUsersLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Nearby users</p>
+                    <p id="nearbyUsersCount" class="mt-2 text-xl font-bold text-red-200">0 online</p>
+                  </div>
+                  <p id="nearbyUsersHint" class="text-sm text-slate-300">Live nearby users receive simulated emergency broadcast updates.</p>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-4">
+              <button id="triggerButton" class="rounded-2xl bg-red-500 px-6 py-4 text-sm font-bold uppercase tracking-[0.28em] text-white shadow-[0_14px_34px_rgba(255,77,79,0.35)] transition hover:-translate-y-0.5 hover:bg-red-400">Trigger red alert</button>
+              <button id="stopButton" class="rounded-2xl border border-white/15 bg-white/5 px-6 py-4 text-sm font-semibold uppercase tracking-[0.28em] text-slate-100 transition hover:bg-white/10">Clear alert</button>
+              <button id="sendPrimaryButton" class="rounded-2xl border border-green-400/30 bg-green-500/10 px-6 py-4 text-sm font-bold uppercase tracking-[0.24em] text-green-100 transition hover:bg-green-500/15">Send alert SMS</button>
+              <button id="sosButton" class="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-6 py-4 text-sm font-bold uppercase tracking-[0.24em] text-rose-100 transition hover:bg-rose-500/15">SOS share location</button>
+              <button id="voiceAlertButton" class="rounded-2xl border border-sky-400/30 bg-sky-500/10 px-6 py-4 text-sm font-bold uppercase tracking-[0.24em] text-sky-100 transition hover:bg-sky-500/15">Voice alert</button>
+            </div>
+          </div>
+
+          <div class="glass rounded-[28px] border p-5 sm:p-6">
+            <div class="mb-5 flex items-center justify-between">
+              <div>
+                <p id="countdownLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Response countdown</p>
+                <h3 id="countdownTitle" class="mt-2 text-2xl font-bold">Time to shelter</h3>
+              </div>
+              <div id="demoBadge" class="rounded-full border border-red-400/25 bg-red-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-red-200">Live demo</div>
+            </div>
+            <div class="grid grid-cols-3 gap-3 text-center">
+              <div class="rounded-2xl bg-slate-950/70 p-4"><p id="countMin" class="text-4xl font-extrabold">00</p><p id="minutesLabel" class="mt-2 text-xs uppercase tracking-[0.24em] text-slate-400">Min</p></div>
+              <div class="rounded-2xl bg-slate-950/70 p-4"><p id="countSec" class="text-4xl font-extrabold">45</p><p id="secondsLabel" class="mt-2 text-xs uppercase tracking-[0.24em] text-slate-400">Sec</p></div>
+              <div class="rounded-2xl bg-slate-950/70 p-4"><p id="countStatus" class="text-4xl font-extrabold text-emerald-300">OK</p><p id="stateSmallLabel" class="mt-2 text-xs uppercase tracking-[0.24em] text-slate-400">State</p></div>
+            </div>
+            <div class="mt-6 rounded-2xl border border-white/10 bg-slate-950/55 p-4">
+              <div class="mb-4 flex items-center justify-between text-sm"><span id="readinessLabel" class="text-slate-300">Live watch health</span><span id="readinessValue" class="font-semibold text-emerald-300">88%</span></div>
+              <div class="h-3 overflow-hidden rounded-full bg-white/8"><div id="readinessBar" class="h-full rounded-full bg-gradient-to-r from-emerald-400 to-lime-300" style="width:88%"></div></div>
+              <ul class="mt-4 space-y-2 text-sm text-slate-300">
+                <li id="readinessTip1">• Watch mode refreshes map data automatically.</li>
+                <li id="readinessTip2">• Notifications surface nearby incidents and alerts.</li>
+                <li id="readinessTip3">• AI suggestions recommend safer routes and shelter options.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mt-8 grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
+        <div class="space-y-8">
+          <div class="glass rounded-[28px] p-4 sm:p-5">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3 px-2">
+              <div>
+                <p id="mapSectionLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Interactive smart map</p>
+                <h3 id="mapSectionTitle" class="mt-2 text-2xl font-bold">Live map, clustered incidents, and alert markers</h3>
+              </div>
+              <div class="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.2em]">
+                <span id="legendUser" class="rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-sky-100">User</span>
+                <span id="legendIncident" class="rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100">Incident</span>
+                <span id="legendAlert" class="rounded-full border border-red-400/30 bg-red-500/10 px-3 py-2 text-red-100">Alert</span>
+                <span id="legendSafe" class="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-emerald-100">Safe place</span>
+              </div>
+            </div>
+            <div class="mb-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+              <div class="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <input id="locationSearchInput" type="text" placeholder="Search city or area" class="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-red-400/50" />
+                <button id="locationSearchButton" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100">Search</button>
+              </div>
+              <div class="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.2em]">
+                <label class="rounded-full border border-white/10 bg-white/5 px-3 py-2"><input id="filterIncidents" type="checkbox" checked class="mr-2 accent-red-500">Incidents</label>
+                <label class="rounded-full border border-white/10 bg-white/5 px-3 py-2"><input id="filterAlerts" type="checkbox" checked class="mr-2 accent-red-500">Alerts</label>
+                <label class="rounded-full border border-white/10 bg-white/5 px-3 py-2"><input id="filterSafePlaces" type="checkbox" checked class="mr-2 accent-red-500">Safe places</label>
+              </div>
+            </div>
+            <div class="rounded-[28px] border border-white/10 bg-slate-950/60 p-3">
+              <div id="map"></div>
+            </div>
+          </div>
+
+          <div class="glass rounded-[28px] p-6 sm:p-7">
+            <div class="mb-6 flex items-center justify-between gap-4">
+              <div>
+                <p id="areasLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Live markers</p>
+                <h3 id="areasTitle" class="mt-2 text-2xl font-bold">Area watch list</h3>
+              </div>
+              <span id="tapCardsLabel" class="text-xs uppercase tracking-[0.24em] text-slate-500">Auto-updating</span>
+            </div>
+            <div id="areaGrid" class="grid gap-4 sm:grid-cols-2"></div>
+          </div>
+        </div>
+
+        <div class="space-y-8">
+          <div class="glass rounded-[28px] p-6 sm:p-7">
+            <div class="mb-6 flex items-center justify-between gap-4">
+              <div>
+                <p id="aiPanelLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">AI live monitoring</p>
+                <h3 id="aiPanelTitle" class="mt-2 text-2xl font-bold">AI suggestions & notifications</h3>
+              </div>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div class="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                <p id="watchModeCardLabel" class="text-xs uppercase tracking-[0.24em] text-slate-500">Watch mode</p>
+                <p id="watchModeState" class="mt-2 text-lg font-bold text-emerald-300">Enabled</p>
+                <p id="watchModeHint" class="mt-2 text-sm text-slate-300">Map data refreshes every few seconds.</p>
+              </div>
+              <div class="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                <p id="notificationModeCardLabel" class="text-xs uppercase tracking-[0.24em] text-slate-500">AI notification mode</p>
+                <p id="notificationModeState" class="mt-2 text-lg font-bold text-emerald-300">Enabled</p>
+                <p id="notificationModeHint" class="mt-2 text-sm text-slate-300">Browser alerts for incidents and warnings.</p>
+              </div>
+            </div>
+            <div class="mt-4 rounded-2xl border border-red-400/15 bg-red-500/5 p-4">
+              <p id="aiSuggestionLabel" class="text-xs font-semibold uppercase tracking-[0.24em] text-red-100/80">AI suggestion</p>
+              <p id="aiSuggestionText" class="mt-2 text-sm text-slate-200">Safest route right now is eastbound via Inner Ring Road. Avoid the traffic cluster near Civil Lines.</p>
+            </div>
+            <div id="eventFeed" class="mt-4 space-y-3"></div>
+          </div>
+
+          <div class="glass rounded-[28px] p-6 sm:p-7">
+            <div class="mb-6 flex items-center justify-between gap-4">
+              <div>
+                <p id="contactsLabel" class="text-xs uppercase tracking-[0.28em] text-slate-400">Family reach</p>
+                <h3 id="contactsTitle" class="mt-2 text-2xl font-bold">Emergency contact shortcuts</h3>
+              </div>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <input id="mobileInput" type="tel" maxlength="10" placeholder="9876543210" class="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-4 text-base text-white outline-none placeholder:text-slate-500 focus:border-red-400/50" />
+              <button id="addButton" class="rounded-2xl bg-white/10 px-5 py-4 text-sm font-bold uppercase tracking-[0.22em] text-white transition hover:bg-white/15">Add</button>
+            </div>
+            <div class="mt-3 rounded-2xl border border-green-400/20 bg-green-500/5 p-4">
+              <p id="directSmsLabel" class="text-xs font-semibold uppercase tracking-[0.24em] text-green-100/80">Direct alert SMS</p>
+              <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                <input id="directSmsInput" type="tel" maxlength="10" placeholder="9876543210" class="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-4 text-base text-white outline-none placeholder:text-slate-500 focus:border-green-400/50" />
+                <button id="sendDirectSmsButton" class="rounded-2xl border border-green-400/30 bg-green-500/10 px-5 py-4 text-sm font-bold uppercase tracking-[0.22em] text-green-100 transition hover:bg-green-500/15">Send to number</button>
+              </div>
+            </div>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+              <button id="sendAllSmsButton" class="rounded-2xl border border-green-400/30 bg-green-500/10 px-5 py-4 text-sm font-bold uppercase tracking-[0.22em] text-green-100 transition hover:bg-green-500/15">Send alert to all</button>
+              <button id="copySmsButton" class="rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-5 py-4 text-sm font-bold uppercase tracking-[0.22em] text-cyan-100 transition hover:bg-cyan-500/15">Copy alert text</button>
+            </div>
+            <p id="smsHelperText" class="mt-4 text-sm text-slate-400">Saved users receive ready SMS drafts. On phones, the Messages app opens with the alert text prefilled.</p>
+            <div id="contactList" class="mt-5 space-y-3"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="permissionModal" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/85 p-4"><div class="glass w-full max-w-lg rounded-[28px] p-6 sm:p-8"><p class="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">Location permission</p><h2 class="mt-3 text-3xl font-extrabold">Allow location access for better safety tracking?</h2><p class="mt-4 text-sm leading-6 text-slate-300">Allow live GPS tracking to show your blue live marker, nearby incidents, safe places, and emergency routing suggestions. You can also deny and search manually.</p><div class="mt-6 flex flex-wrap gap-3"><button id="allowLocationButton" class="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold uppercase tracking-[0.24em] text-slate-950">Allow</button><button id="denyLocationButton" class="rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-bold uppercase tracking-[0.24em] text-white">Deny</button></div></div></div><section id="alertOverlay" class="alert-screen items-center justify-center p-4 sm:p-6">
+    <div class="glass w-full max-w-5xl rounded-[32px] border border-red-400/25 p-6 shadow-[0_0_60px_rgba(255,77,79,0.18)] sm:p-8">
+      <div class="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+        <div class="space-y-6">
+          <div id="overlayPill" class="inline-flex items-center gap-3 rounded-full border border-red-400/30 bg-red-500/15 px-4 py-2 text-sm font-bold uppercase tracking-[0.28em] text-red-100"><span class="h-2.5 w-2.5 rounded-full bg-red-300 shadow-[0_0_16px_rgba(255,255,255,0.7)]"></span>Active red alert</div>
+          <div>
+            <p id="overlayEyebrow" class="text-sm uppercase tracking-[0.3em] text-red-200/80">Take protective action now</p>
+            <h2 id="overlayTitle" class="mt-3 text-4xl font-extrabold tracking-tight sm:text-5xl">Move to the nearest protected space.</h2>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-3">
+            <div class="rounded-2xl border border-white/10 bg-slate-950/60 p-4"><p id="overlayCityLabel" class="text-xs uppercase tracking-[0.24em] text-slate-400">City</p><p id="overlayCityName" class="mt-2 text-2xl font-bold">Nagpur</p></div>
+            <div class="rounded-2xl border border-white/10 bg-slate-950/60 p-4"><p id="overlayCountdownLabel" class="text-xs uppercase tracking-[0.24em] text-slate-400">Countdown</p><p id="overlayCountdown" class="mt-2 text-2xl font-bold text-red-200">00:45</p></div>
+            <div class="rounded-2xl border border-white/10 bg-slate-950/60 p-4"><p id="overlayInstructionLabel" class="text-xs uppercase tracking-[0.24em] text-slate-400">Instruction</p><p id="overlayInstructionText" class="mt-2 text-sm font-semibold text-slate-200">Stay low, move indoors, confirm family status.</p></div>
+          </div>
+          <ol class="space-y-3 text-sm text-slate-200">
+            <li id="overlayStep1">1. Enter the closest protected room or reinforced area.</li>
+            <li id="overlayStep2">2. Avoid windows and glass-fronted spaces.</li>
+            <li id="overlayStep3">3. Keep your phone accessible and monitor official updates.</li>
+          </ol>
+          <div class="flex flex-wrap gap-3">
+            <button id="overlayStopButton" class="rounded-2xl bg-white px-6 py-4 text-sm font-bold uppercase tracking-[0.24em] text-slate-950 transition hover:bg-slate-100">I'm safe / clear</button>
+            <button id="overlaySendAllButton" class="rounded-2xl border border-green-400/35 bg-green-500/15 px-6 py-4 text-sm font-bold uppercase tracking-[0.24em] text-green-200 transition hover:bg-green-500/20">Send SMS to all users</button>
+          </div>
+        </div>
+        <div class="space-y-5">
+          <div class="rounded-[28px] border border-white/10 bg-slate-950/65 p-5">
+            <div class="mb-4 flex items-center justify-between"><h3 id="queueTitle" class="text-lg font-bold">Outgoing household alerts</h3><span id="queueBadge" class="rounded-full bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.24em] text-slate-400">Simulation + SMS draft</span></div>
+            <div id="statusList" class="space-y-3"></div>
+          </div>
+          <div class="rounded-[28px] border border-white/10 bg-slate-950/65 p-5">
+            <div class="mb-4 flex items-center justify-between"><h3 id="smsActionsTitle" class="text-lg font-bold">One-tap messages</h3><span id="smsActionsBadge" class="text-xs uppercase tracking-[0.24em] text-slate-500">Uses SMS app</span></div>
+            <div id="smsButtonList" class="space-y-3"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    tailwind.config = { theme: { extend: {} } };
+
+    const contactsKey = 'bharatShieldContacts';
+    const langKey = 'bharatShieldLanguage';
+    let currentLanguage = localStorage.getItem(langKey) || 'en';
+    let subscribedNumbers = [];
+    let countdown = 45;
+    let countdownTimer = null;
+    let watchTimer = null;
+    let audioContext = null;
+    let sirenOscillator = null;
+    let sirenLfo = null;
+
+    const state = {
+      map: null,
+      userMarker: null,
+      alertMarker: null,
+      markerCluster: null,
+      incidentMarkers: [],
+      safeMarkers: [],
+      nearbyUserMarkers: [],
+      userLatLng: [21.1458, 79.0882],
+      liveIncidents: [],
+      safePlaces: [
+        { name: 'Basement shelter zone', lat: 21.1495, lng: 79.0826, type: 'safe' },
+        { name: 'Municipal safe hall', lat: 21.1375, lng: 79.0958, type: 'safe' },
+        { name: 'Medical response point', lat: 21.1538, lng: 79.1012, type: 'safe' }
+      ],
+      nearbyUsers: [
+        { name: 'User A', lat: 21.1482, lng: 79.0841 },
+        { name: 'User B', lat: 21.1416, lng: 79.0964 },
+        { name: 'User C', lat: 21.1529, lng: 79.0925 }
+      ],
+      watchMode: true,
+      notificationsEnabled: true,
+      lowNetworkMode: false,
+      locationAllowed: null,
+      alertCircles: [],
+      riskZones: []
+    };
+
+    const baseIncidents = [
+      { type: 'accident', severity: 'high', title: 'Accident detected nearby', lat: 21.1512, lng: 79.0794, description: 'Multi-vehicle collision reported', time: '2 min ago' },
+      { type: 'crime', severity: 'high', title: 'Crime report received', lat: 21.1398, lng: 79.0911, description: 'Suspicious activity flagged by users', time: '4 min ago' },
+      { type: 'fire', severity: 'medium', title: 'Fire response active', lat: 21.1436, lng: 79.1045, description: 'Fire unit responding to smoke alert', time: '6 min ago' },
+      { type: 'medical', severity: 'medium', title: 'Medical emergency logged', lat: 21.1547, lng: 79.0868, description: 'Ambulance route prepared', time: '8 min ago' }
+    ];
+
+    const translations = {
+      en: {
+        brandTagline: 'AI safety watch demo', language: 'Language', watchModeLabel: 'Watch mode', pushToggleLabel: 'Alerts', networkModeLabel: 'Low network', systemStatusLabel: 'System status', routine: 'Routine monitoring', active: 'Active red alert',
+        ticker: 'Smart map • live user tracking • clustered incidents • AI alerts • red alert marker • push-style browser notifications', heroChip: 'AI live watch + red alert', heroEyebrow: 'Real-time safety dashboard', heroTitle: 'Interactive map, AI monitoring, and emergency alerts in one screen.', heroDescription: 'Track location, cluster nearby incidents, switch on watch mode, and send red-alert SMS actions from the same interface.', locationLabel: 'Current location', timeLabel: 'Local time', alertStateLabel: 'Alert state', noWarning: 'No active warning', routineHint: 'Routine monitoring active', smsModeLabel: 'AI insight', monitoring: 'Monitoring', insightHint: 'Safe route suggestions ready', trigger: 'Trigger red alert', clear: 'Clear alert', sendAlertSms: 'Send alert SMS', countdownLabel: 'Response countdown', countdownTitle: 'Time to shelter', demoBadge: 'Live demo', minutes: 'Min', seconds: 'Sec', state: 'State', readinessLabel: 'Live watch health', tip1: '• Watch mode refreshes map data automatically.', tip2: '• Notifications surface nearby incidents and alerts.', tip3: '• AI suggestions recommend safer routes and shelter options.', mapSectionLabel: 'Interactive smart map', mapSectionTitle: 'Live map, clustered incidents, and alert markers', legendUser: 'User', legendIncident: 'Incident', legendAlert: 'Alert', legendSafe: 'Safe place', areasLabel: 'Live markers', areasTitle: 'Area watch list', tapCards: 'Auto-updating', aiPanelLabel: 'AI live monitoring', aiPanelTitle: 'AI suggestions & notifications', watchModeCardLabel: 'Watch mode', enabled: 'Enabled', disabled: 'Disabled', watchModeHint: 'Map data refreshes every few seconds.', notificationModeCardLabel: 'AI notification mode', notificationModeHint: 'Browser alerts for incidents and warnings.', aiSuggestionLabel: 'AI suggestion', aiSuggestionText: 'Safest route right now is eastbound via Inner Ring Road. Avoid the traffic cluster near Civil Lines.', nearbyUsersLabel: 'Nearby users', nearbyUsersHint: 'Live nearby users receive simulated emergency broadcast updates.', contactsLabel: 'Family reach', contactsTitle: 'Emergency contact shortcuts', add: 'Add', directSmsLabel: 'Direct alert SMS', sendToNumber: 'Send to number', sendAll: 'Send alert to all', copyAlert: 'Copy alert text', smsHelper: 'Saved users receive ready SMS drafts. On phones, the Messages app opens with the alert text prefilled.', overlayPill: 'Active red alert', overlayEyebrow: 'Take protective action now', overlayTitle: 'Move to the nearest protected space.', overlayCityLabel: 'City', overlayCountdownLabel: 'Countdown', overlayInstructionLabel: 'Instruction', overlayInstructionText: 'Stay low, move indoors, confirm family status.', overlayStep1: '1. Enter the closest protected room or reinforced area.', overlayStep2: '2. Avoid windows and glass-fronted spaces.', overlayStep3: '3. Keep your phone accessible and monitor official updates.', overlaySafe: "I'm safe / clear", overlaySendAll: 'Send SMS to all users', queueTitle: 'Outgoing household alerts', queueBadge: 'Simulation + SMS draft', smsActionsTitle: 'One-tap messages', smsActionsBadge: 'Uses SMS app', live: 'LIVE', ok: 'OK', shelterNow: 'Shelter immediately', sendSms: 'Send SMS', householdContact: 'Household contact', queueing: 'Queueing alert message…', dispatching: 'Dispatching alert…', draftPrepared: 'SMS draft ready to send.', noContactsQueue: 'No contacts saved yet. Add numbers to enable alert SMS.', noSmsActions: 'SMS actions appear here after contacts are added.', contactCardLabel: 'Saved user', remove: 'Remove', emptyContacts: 'Add trusted users to send red alert SMS quickly.', invalidPhone: 'Please enter a valid 10-digit mobile number.', invalidDirectPhone: 'Enter a 10-digit number to send the alert SMS.', duplicatePhone: 'That number is already saved.', noContactsSend: 'Add at least one saved user first.', copied: 'Alert message copied.', copyFailed: 'Copy failed on this browser.', alertMessage: '🚨 RED ALERT for Nagpur. Move to the nearest protected space immediately and confirm your safety when secure.', notificationIncident: 'Accident detected nearby', notificationTraffic: 'Heavy traffic ahead', notificationAlert: 'Emergency alert in your area', routeSuggestion: 'AI suggests heading east to the nearest safe hall.', alertDetails: 'Type: Red Alert • Time: ', liveArea: 'AI watch area', watchEnabledHint: 'AI refresh and map updates are running.', watchDisabledHint: 'AI refresh paused. Turn watch mode back on to resume.', importantPlace: 'Important location', traffic: 'Traffic', accident: 'Accident', crowd: 'Crowd', utility: 'Utility', safeRoute: 'Safest route available', alertMarkerTitle: 'Red alert marker'
+      },
+      hi: {
+        brandTagline: 'AI सुरक्षा वॉच डेमो', language: 'भाषा', watchModeLabel: 'वॉच मोड', pushToggleLabel: 'अलर्ट', networkModeLabel: 'लो नेटवर्क', systemStatusLabel: 'सिस्टम स्टेटस', routine: 'सामान्य निगरानी', active: 'सक्रिय रेड अलर्ट', ticker: 'स्मार्ट मैप • लाइव लोकेशन ट्रैकिंग • क्लस्टर इन्सिडेंट • AI अलर्ट • रेड अलर्ट मार्कर • ब्राउज़र नोटिफिकेशन', heroChip: 'AI लाइव वॉच + रेड अलर्ट', heroEyebrow: 'रीयल-टाइम सेफ्टी डैशबोर्ड', heroTitle: 'इंटरएक्टिव मैप, AI मॉनिटरिंग और इमरजेंसी अलर्ट एक ही स्क्रीन पर।', heroDescription: 'लोकेशन ट्रैक करें, नज़दीकी घटनाओं को क्लस्टर करें, वॉच मोड चालू रखें और इसी इंटरफेस से रेड-अलर्ट SMS भेजें।', locationLabel: 'वर्तमान स्थान', timeLabel: 'लोकल समय', alertStateLabel: 'अलर्ट स्थिति', noWarning: 'कोई सक्रिय चेतावनी नहीं', routineHint: 'सामान्य निगरानी सक्रिय है', smsModeLabel: 'AI इनसाइट', monitoring: 'निगरानी', insightHint: 'सुरक्षित रूट सुझाव तैयार', trigger: 'रेड अलर्ट चालू करें', clear: 'अलर्ट साफ़ करें', sendAlertSms: 'अलर्ट SMS भेजें', countdownLabel: 'रिस्पॉन्स काउंटडाउन', countdownTitle: 'शेल्टर तक समय', demoBadge: 'लाइव डेमो', minutes: 'मिनट', seconds: 'सेकंड', state: 'स्थिति', readinessLabel: 'लाइव वॉच हेल्थ', tip1: '• वॉच मोड मैप डेटा को ऑटो-रिफ्रेश करता है।', tip2: '• नोटिफिकेशन नज़दीकी घटनाएँ और अलर्ट दिखाते हैं।', tip3: '• AI सुरक्षित रूट और शेल्टर सुझाव देता है।', mapSectionLabel: 'इंटरएक्टिव स्मार्ट मैप', mapSectionTitle: 'लाइव मैप, क्लस्टर घटनाएँ और अलर्ट मार्कर', legendUser: 'यूज़र', legendIncident: 'घटना', legendAlert: 'अलर्ट', legendSafe: 'सुरक्षित स्थान', areasLabel: 'लाइव मार्कर', areasTitle: 'एरिया वॉच लिस्ट', tapCards: 'ऑटो-अपडेट', aiPanelLabel: 'AI लाइव मॉनिटरिंग', aiPanelTitle: 'AI सुझाव और नोटिफिकेशन', watchModeCardLabel: 'वॉच मोड', enabled: 'सक्रिय', disabled: 'बंद', watchModeHint: 'मैप डेटा हर कुछ सेकंड में रिफ्रेश होता है।', notificationModeCardLabel: 'AI नोटिफिकेशन मोड', notificationModeHint: 'घटनाओं और चेतावनियों के लिए ब्राउज़र अलर्ट।', aiSuggestionLabel: 'AI सुझाव', aiSuggestionText: 'अभी सबसे सुरक्षित रूट Inner Ring Road के पूर्वी हिस्से से है। Civil Lines ट्रैफिक क्लस्टर से बचें।', nearbyUsersLabel: 'नज़दीकी यूज़र', nearbyUsersHint: 'नज़दीकी यूज़र को सिम्युलेटेड लाइव इमरजेंसी ब्रॉडकास्ट अपडेट मिलते हैं।', contactsLabel: 'परिवार संपर्क', contactsTitle: 'आपातकालीन संपर्क शॉर्टकट', add: 'जोड़ें', directSmsLabel: 'सीधे नंबर पर अलर्ट SMS', sendToNumber: 'नंबर पर भेजें', sendAll: 'सबको अलर्ट भेजें', copyAlert: 'अलर्ट टेक्स्ट कॉपी करें', smsHelper: 'सेव यूज़र के लिए तैयार SMS ड्राफ्ट खुलते हैं। फोन पर मैसेज ऐप में टेक्स्ट पहले से भरा रहेगा।', overlayPill: 'सक्रिय रेड अलर्ट', overlayEyebrow: 'अभी सुरक्षा कार्रवाई करें', overlayTitle: 'नज़दीकी सुरक्षित स्थान पर जाएँ।', overlayCityLabel: 'शहर', overlayCountdownLabel: 'काउंटडाउन', overlayInstructionLabel: 'निर्देश', overlayInstructionText: 'नीचे रहें, अंदर जाएँ, परिवार की स्थिति देखें।', overlayStep1: '1. सबसे नज़दीकी सुरक्षित कमरे या मजबूत स्थान में जाएँ।', overlayStep2: '2. खिड़कियों और काँच से दूर रहें।', overlayStep3: '3. फोन पास रखें और आधिकारिक अपडेट देखें।', overlaySafe: 'मैं सुरक्षित हूँ / क्लियर', overlaySendAll: 'सभी यूज़र को SMS भेजें', queueTitle: 'आउटगोइंग परिवार अलर्ट', queueBadge: 'सिमुलेशन + SMS ड्राफ्ट', smsActionsTitle: 'वन-टैप मैसेज', smsActionsBadge: 'SMS ऐप उपयोग', live: 'LIVE', ok: 'OK', shelterNow: 'तुरंत शेल्टर लें', sendSms: 'SMS भेजें', householdContact: 'परिवार संपर्क', queueing: 'अलर्ट मैसेज कतार में…', dispatching: 'अलर्ट भेजा जा रहा है…', draftPrepared: 'SMS ड्राफ्ट भेजने के लिए तैयार है।', noContactsQueue: 'अभी कोई सेव यूज़र नहीं है। अलर्ट SMS के लिए नंबर जोड़ें।', noSmsActions: 'नंबर जोड़ने के बाद SMS एक्शन यहाँ दिखेंगे।', contactCardLabel: 'सेव यूज़र', remove: 'हटाएँ', emptyContacts: 'रेड अलर्ट SMS जल्दी भेजने के लिए भरोसेमंद यूज़र जोड़ें।', invalidPhone: 'कृपया सही 10-अंकों का मोबाइल नंबर दर्ज करें।', invalidDirectPhone: 'अलर्ट SMS भेजने के लिए 10-अंकों का नंबर दर्ज करें।', duplicatePhone: 'यह नंबर पहले से सेव है।', noContactsSend: 'पहले कम से कम एक सेव यूज़र जोड़ें।', copied: 'अलर्ट मैसेज कॉपी हो गया।', copyFailed: 'इस ब्राउज़र पर कॉपी नहीं हो सकी।', alertMessage: '🚨 नागपुर के लिए रेड अलर्ट। तुरंत नज़दीकी सुरक्षित स्थान पर जाएँ और सुरक्षित होने पर अपनी स्थिति बताएं।', notificationIncident: 'पास में दुर्घटना detected', notificationTraffic: 'आगे भारी ट्रैफिक', notificationAlert: 'आपके क्षेत्र में इमरजेंसी अलर्ट', routeSuggestion: 'AI पूर्व दिशा के सुरक्षित हॉल की ओर जाने का सुझाव देता है।', alertDetails: 'प्रकार: रेड अलर्ट • समय: ', liveArea: 'AI वॉच एरिया', watchEnabledHint: 'AI रिफ्रेश और मैप अपडेट चालू हैं।', watchDisabledHint: 'AI रिफ्रेश रुका है। फिर से शुरू करने के लिए वॉच मोड चालू करें।', importantPlace: 'महत्वपूर्ण स्थान', traffic: 'ट्रैफिक', accident: 'दुर्घटना', crowd: 'भीड़', utility: 'यूटिलिटी', safeRoute: 'सबसे सुरक्षित रूट', alertMarkerTitle: 'रेड अलर्ट मार्कर'
+      },
+      mr: {
+        brandTagline: 'AI सुरक्षा वॉच डेमो', language: 'भाषा', watchModeLabel: 'वॉच मोड', pushToggleLabel: 'अलर्ट', networkModeLabel: 'लो नेटवर्क', systemStatusLabel: 'सिस्टम स्थिती', routine: 'नियमित निरीक्षण', active: 'सक्रिय रेड अलर्ट', ticker: 'स्मार्ट मॅप • लाईव्ह लोकेशन ट्रॅकिंग • क्लस्टर इन्सिडेंट • AI अलर्ट • रेड अलर्ट मार्कर • ब्राउझर नोटिफिकेशन', heroChip: 'AI लाईव्ह वॉच + रेड अलर्ट', heroEyebrow: 'रीअल-टाइम सेफ्टी डॅशबोर्ड', heroTitle: 'इंटरअॅक्टिव मॅप, AI मॉनिटरिंग आणि इमर्जन्सी अलर्ट एका स्क्रीनवर.', heroDescription: 'लोकेशन ट्रॅक करा, जवळच्या घटना क्लस्टर करा, वॉच मोड चालू ठेवा आणि याच इंटरफेसमधून रेड-अलर्ट SMS पाठवा.', locationLabel: 'सध्याचे स्थान', timeLabel: 'स्थानिक वेळ', alertStateLabel: 'अलर्ट स्थिती', noWarning: 'सध्या कोणतीही चेतावणी नाही', routineHint: 'नियमित निरीक्षण सुरू आहे', smsModeLabel: 'AI इनसाइट', monitoring: 'निरीक्षण', insightHint: 'सुरक्षित मार्ग सूचना तयार', trigger: 'रेड अलर्ट सुरू करा', clear: 'अलर्ट साफ करा', sendAlertSms: 'अलर्ट SMS पाठवा', countdownLabel: 'प्रतिक्रिया काउंटडाउन', countdownTitle: 'शेल्टरपर्यंत वेळ', demoBadge: 'लाईव्ह डेमो', minutes: 'मिनिट', seconds: 'सेकंद', state: 'स्थिती', readinessLabel: 'लाईव्ह वॉच हेल्थ', tip1: '• वॉच मोड मॅप डेटा आपोआप रिफ्रेश करतो.', tip2: '• नोटिफिकेशन जवळच्या घटना आणि अलर्ट दाखवतात.', tip3: '• AI सुरक्षित मार्ग आणि शेल्टर सुचवतो.', mapSectionLabel: 'इंटरअॅक्टिव स्मार्ट मॅप', mapSectionTitle: 'लाईव्ह मॅप, क्लस्टर घटना आणि अलर्ट मार्कर', legendUser: 'युजर', legendIncident: 'घटना', legendAlert: 'अलर्ट', legendSafe: 'सुरक्षित जागा', areasLabel: 'लाईव्ह मार्कर', areasTitle: 'एरिया वॉच लिस्ट', tapCards: 'ऑटो-अपडेट', aiPanelLabel: 'AI लाईव्ह मॉनिटरिंग', aiPanelTitle: 'AI सूचना आणि नोटिफिकेशन', watchModeCardLabel: 'वॉच मोड', enabled: 'चालू', disabled: 'बंद', watchModeHint: 'मॅप डेटा काही सेकंदांनी रिफ्रेश होतो.', notificationModeCardLabel: 'AI नोटिफिकेशन मोड', notificationModeHint: 'घटना आणि चेतावण्यांसाठी ब्राउझर अलर्ट.', aiSuggestionLabel: 'AI सूचना', aiSuggestionText: 'सध्या सर्वात सुरक्षित मार्ग Inner Ring Road च्या पूर्वेकडील भागातून आहे. Civil Lines ट्रॅफिक क्लस्टर टाळा.', nearbyUsersLabel: 'जवळचे युजर', nearbyUsersHint: 'जवळच्या युजरना सिम्युलेटेड लाईव्ह इमर्जन्सी अपडेट मिळतात.', contactsLabel: 'कुटुंब संपर्क', contactsTitle: 'आपत्कालीन संपर्क शॉर्टकट', add: 'जोडा', directSmsLabel: 'थेट नंबरवर अलर्ट SMS', sendToNumber: 'नंबरवर पाठवा', sendAll: 'सर्वांना अलर्ट पाठवा', copyAlert: 'अलर्ट मजकूर कॉपी करा', smsHelper: 'सेव्ह केलेल्या युजरसाठी तयार SMS ड्राफ्ट उघडतात. फोनवर मेसेजेस अॅपमध्ये मजकूर भरलेला असेल.', overlayPill: 'सक्रिय रेड अलर्ट', overlayEyebrow: 'आत्ताच सुरक्षात्मक कृती करा', overlayTitle: 'जवळच्या सुरक्षित जागेत जा.', overlayCityLabel: 'शहर', overlayCountdownLabel: 'काउंटडाउन', overlayInstructionLabel: 'सूचना', overlayInstructionText: 'खाली राहा, आत जा, कुटुंबाची स्थिती तपासा.', overlayStep1: '1. जवळच्या सुरक्षित खोलीत किंवा मजबूत जागेत जा.', overlayStep2: '2. खिडक्या आणि काचांपासून दूर राहा.', overlayStep3: '3. फोन जवळ ठेवा आणि अधिकृत अपडेट पहा.', overlaySafe: 'मी सुरक्षित आहे / क्लिअर', overlaySendAll: 'सर्व युजरना SMS पाठवा', queueTitle: 'आउटगोइंग कुटुंब अलर्ट', queueBadge: 'सिम्युलेशन + SMS ड्राफ्ट', smsActionsTitle: 'वन-टॅप मेसेज', smsActionsBadge: 'SMS अॅप वापरते', live: 'LIVE', ok: 'OK', shelterNow: 'ताबडतोब शेल्टर घ्या', sendSms: 'SMS पाठवा', householdContact: 'कुटुंब संपर्क', queueing: 'अलर्ट मेसेज रांगेत…', dispatching: 'अलर्ट पाठवला जात आहे…', draftPrepared: 'SMS ड्राफ्ट पाठवण्यासाठी तयार आहे.', noContactsQueue: 'अजून कोणताही सेव्ह युजर नाही. अलर्ट SMS साठी नंबर जोडा.', noSmsActions: 'नंबर जोडल्यावर SMS अॅक्शन येथे दिसतील.', contactCardLabel: 'सेव्ह युजर', remove: 'काढा', emptyContacts: 'रेड अलर्ट SMS पटकन पाठवण्यासाठी विश्वासू युजर जोडा.', invalidPhone: 'कृपया वैध 10 अंकी मोबाइल नंबर टाका.', invalidDirectPhone: 'अलर्ट SMS पाठवण्यासाठी 10 अंकी नंबर टाका.', duplicatePhone: 'हा नंबर आधीच सेव्ह आहे.', noContactsSend: 'कृपया किमान एक सेव्ह युजर जोडा.', copied: 'अलर्ट मजकूर कॉपी झाला.', copyFailed: 'या ब्राउझरमध्ये कॉपी करता आली नाही.', alertMessage: '🚨 नागपूरसाठी रेड अलर्ट. तात्काळ जवळच्या सुरक्षित जागेत जा आणि सुरक्षित झाल्यावर तुमची स्थिती कळवा.', notificationIncident: 'जवळ अपघात आढळला', notificationTraffic: 'समोर मोठी वाहतूक', notificationAlert: 'तुमच्या परिसरात इमर्जन्सी अलर्ट', routeSuggestion: 'AI पूर्वेकडील सुरक्षित हॉलकडे जाण्याची सूचना देतो.', alertDetails: 'प्रकार: रेड अलर्ट • वेळ: ', liveArea: 'AI वॉच एरिया', watchEnabledHint: 'AI रिफ्रेश आणि मॅप अपडेट सुरू आहेत.', watchDisabledHint: 'AI रिफ्रेश थांबले आहे. पुन्हा सुरू करण्यासाठी वॉच मोड चालू करा.', importantPlace: 'महत्त्वाचे स्थान', traffic: 'ट्रॅफिक', accident: 'अपघात', crowd: 'गर्दी', utility: 'युटिलिटी', safeRoute: 'सर्वात सुरक्षित मार्ग', alertMarkerTitle: 'रेड अलर्ट मार्कर'
+      },
+      he: {
+        brandTagline: 'הדגמת מעקב בטיחות AI', language: 'שפה', watchModeLabel: 'מצב מעקב', pushToggleLabel: 'התראות', networkModeLabel: 'רשת חלשה', systemStatusLabel: 'מצב מערכת', routine: 'ניטור שגרתי', active: 'התראת אדום פעילה', ticker: 'מפה חכמה • מעקב מיקום חי • אירועים מקובצים • התראות AI • סמן התרעת אדום • התראות דפדפן', heroChip: 'מעקב AI חי + התרעת אדום', heroEyebrow: 'לוח בטיחות בזמן אמת', heroTitle: 'מפה אינטראקטיבית, ניטור AI והתראות חירום במסך אחד.', heroDescription: 'עקבו אחרי המיקום, קבצו אירועים קרובים, הפעילו מצב מעקב ושלחו פעולות SMS מתוך אותו ממשק.', locationLabel: 'מיקום נוכחי', timeLabel: 'שעה מקומית', alertStateLabel: 'מצב התראה', noWarning: 'אין אזהרה פעילה', routineHint: 'ניטור שגרתי פעיל', smsModeLabel: 'תובנת AI', monitoring: 'ניטור', insightHint: 'המלצות למסלול בטוח מוכנות', trigger: 'הפעלת התרעת אדום', clear: 'ניקוי התראה', sendAlertSms: 'שליחת SMS התראה', countdownLabel: 'ספירה לאחור', countdownTitle: 'זמן למרחב מוגן', demoBadge: 'הדגמה חיה', minutes: 'דק', seconds: 'שנ', state: 'מצב', readinessLabel: 'בריאות מצב המעקב', tip1: '• מצב מעקב מרענן את נתוני המפה אוטומטית.', tip2: '• התראות מציגות אירועים קרובים ואזהרות.', tip3: '• AI מציע מסלולים בטוחים ואפשרויות למרחב מוגן.', mapSectionLabel: 'מפה חכמה אינטראקטיבית', mapSectionTitle: 'מפה חיה, אירועים מקובצים וסמני התראה', legendUser: 'משתמש', legendIncident: 'אירוע', legendAlert: 'התראה', legendSafe: 'מקום בטוח', areasLabel: 'סמנים חיים', areasTitle: 'רשימת אזורים', tapCards: 'מתעדכן אוטומטית', aiPanelLabel: 'ניטור AI חי', aiPanelTitle: 'הצעות AI והתראות', watchModeCardLabel: 'מצב מעקב', enabled: 'פעיל', disabled: 'כבוי', watchModeHint: 'נתוני המפה מתרעננים כל כמה שניות.', notificationModeCardLabel: 'מצב התראות AI', notificationModeHint: 'התראות דפדפן על אירועים ואזהרות.', aiSuggestionLabel: 'הצעת AI', aiSuggestionText: 'המסלול הבטוח ביותר כרגע הוא מזרחה דרך Inner Ring Road. הימנעו מאזור Civil Lines.', nearbyUsersLabel: 'משתמשים קרובים', nearbyUsersHint: 'משתמשים קרובים מקבלים עדכוני חירום חיים מדומים.', contactsLabel: 'קשרי משפחה', contactsTitle: 'קיצורי דרך לאנשי קשר', add: 'הוסף', directSmsLabel: 'SMS התראה למספר ישיר', sendToNumber: 'שלח למספר', sendAll: 'שלח התרעה לכולם', copyAlert: 'העתק טקסט התרעה', smsHelper: 'למשתמשים שמורים נפתחות טיוטות SMS מוכנות. בטלפון תיפתח אפליקציית ההודעות עם הטקסט מוכן.', overlayPill: 'התראת אדום פעילה', overlayEyebrow: 'פעלו להגנה כעת', overlayTitle: 'עברו מיד למרחב המוגן הקרוב.', overlayCityLabel: 'עיר', overlayCountdownLabel: 'ספירה לאחור', overlayInstructionLabel: 'הנחיה', overlayInstructionText: 'הישארו נמוך, היכנסו פנימה ואשרו מצב משפחתי.', overlayStep1: '1. היכנסו למרחב מוגן או לחדר מחוזק קרוב.', overlayStep2: '2. התרחקו מחלונות ומזכוכית.', overlayStep3: '3. השאירו את הטלפון זמין ועקבו אחרי עדכונים רשמיים.', overlaySafe: 'אני בטוח / ניקוי', overlaySendAll: 'שלח SMS לכל המשתמשים', queueTitle: 'התראות משפחתיות יוצאות', queueBadge: 'הדמיה + טיוטת SMS', smsActionsTitle: 'הודעות בלחיצה אחת', smsActionsBadge: 'משתמש באפליקציית SMS', live: 'LIVE', ok: 'OK', shelterNow: 'להיכנס מיד למרחב מוגן', sendSms: 'שלח SMS', householdContact: 'איש קשר משפחתי', queueing: 'הודעת התראה בתור…', dispatching: 'שולח התראה…', draftPrepared: 'טיוטת SMS מוכנה לשליחה.', noContactsQueue: 'עדיין אין משתמשים שמורים. הוסיפו מספרים כדי לשלוח SMS התראה.', noSmsActions: 'פעולות SMS יופיעו כאן לאחר הוספת מספרים.', contactCardLabel: 'משתמש שמור', remove: 'הסר', emptyContacts: 'הוסיפו משתמשים מהימנים כדי לשלוח SMS התראת אדום במהירות.', invalidPhone: 'נא להזין מספר טלפון תקין בן 10 ספרות.', invalidDirectPhone: 'יש להזין מספר בן 10 ספרות כדי לשלוח SMS התראה.', duplicatePhone: 'המספר כבר שמור.', noContactsSend: 'יש להוסיף לפחות משתמש שמור אחד.', copied: 'טקסט ההתראה הועתק.', copyFailed: 'ההעתקה נכשלה בדפדפן זה.', alertMessage: '🚨 התראת אדום עבור נאגפור. עברו מיד למרחב המוגן הקרוב ואשרו שאתם בטוחים כאשר ניתן.', notificationIncident: 'זוהתה תאונה בקרבת מקום', notificationTraffic: 'עומס תנועה לפניכם', notificationAlert: 'התראת חירום באזורכם', routeSuggestion: 'AI מציע לנוע מזרחה לעבר האולם המוגן הקרוב.', alertDetails: 'סוג: התראת אדום • זמן: ', liveArea: 'אזור מעקב AI', watchEnabledHint: 'רענון AI ועדכוני מפה פעילים.', watchDisabledHint: 'רענון AI מושהה. הפעילו שוב מצב מעקב כדי להמשיך.', importantPlace: 'מיקום חשוב', traffic: 'תנועה', accident: 'תאונה', crowd: 'התקהלות', utility: 'תשתית', safeRoute: 'המסלול הבטוח ביותר', alertMarkerTitle: 'סמן התרעת אדום'
+      }
+    };
+
+    const textTargets = {
+      brandTagline: 'brandTagline', languageLabel: 'language', watchModeLabel: 'watchModeLabel', pushToggleLabel: 'pushToggleLabel', systemStatusLabel: 'systemStatusLabel', tickerText: 'ticker', heroChip: 'heroChip', heroEyebrow: 'heroEyebrow', heroTitle: 'heroTitle', heroDescription: 'heroDescription', locationLabel: 'locationLabel', timeLabel: 'timeLabel', alertStateLabel: 'alertStateLabel', smsModeLabel: 'smsModeLabel', triggerButton: 'trigger', stopButton: 'clear', sendPrimaryButton: 'sendAlertSms', countdownLabel: 'countdownLabel', countdownTitle: 'countdownTitle', demoBadge: 'demoBadge', minutesLabel: 'minutes', secondsLabel: 'seconds', stateSmallLabel: 'state', readinessLabel: 'readinessLabel', readinessTip1: 'tip1', readinessTip2: 'tip2', readinessTip3: 'tip3', mapSectionLabel: 'mapSectionLabel', mapSectionTitle: 'mapSectionTitle', legendUser: 'legendUser', legendIncident: 'legendIncident', legendAlert: 'legendAlert', legendSafe: 'legendSafe', networkModeLabel: 'networkModeLabel', nearbyUsersLabel: 'nearbyUsersLabel', nearbyUsersHint: 'nearbyUsersHint', areasLabel: 'areasLabel', areasTitle: 'areasTitle', tapCardsLabel: 'tapCards', aiPanelLabel: 'aiPanelLabel', aiPanelTitle: 'aiPanelTitle', watchModeCardLabel: 'watchModeCardLabel', watchModeHint: 'watchModeHint', notificationModeCardLabel: 'notificationModeCardLabel', notificationModeHint: 'notificationModeHint', aiSuggestionLabel: 'aiSuggestionLabel', aiSuggestionText: 'aiSuggestionText', contactsLabel: 'contactsLabel', contactsTitle: 'contactsTitle', addButton: 'add', directSmsLabel: 'directSmsLabel', sendDirectSmsButton: 'sendToNumber', sendAllSmsButton: 'sendAll', copySmsButton: 'copyAlert', smsHelperText: 'smsHelper', overlayPill: 'overlayPill', overlayEyebrow: 'overlayEyebrow', overlayTitle: 'overlayTitle', overlayCityLabel: 'overlayCityLabel', overlayCountdownLabel: 'overlayCountdownLabel', overlayInstructionLabel: 'overlayInstructionLabel', overlayInstructionText: 'overlayInstructionText', overlayStep1: 'overlayStep1', overlayStep2: 'overlayStep2', overlayStep3: 'overlayStep3', overlayStopButton: 'overlaySafe', overlaySendAllButton: 'overlaySendAll', queueTitle: 'queueTitle', queueBadge: 'queueBadge', smsActionsTitle: 'smsActionsTitle', smsActionsBadge: 'smsActionsBadge'
+    };
+
+    function t(key) { return (translations[currentLanguage] || translations.en)[key] || translations.en[key] || key; }
+    function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
+    function getUserPopupHtml() { return `<div><b>Live user location</b><br>${state.userLatLng[0].toFixed(4)}, ${state.userLatLng[1].toFixed(4)}<br><button onclick="shareCurrentLocation()" style="margin-top:8px;padding:6px 10px;border-radius:10px;background:#0f172a;color:white;border:none;">Share Location</button></div>`; }
+    function shareCurrentLocation() { const text = `My live location: ${state.userLatLng[0].toFixed(5)}, ${state.userLatLng[1].toFixed(5)}`; if (navigator.share) navigator.share({ text }).catch(() => {}); else navigator.clipboard?.writeText(text); }
+    window.shareCurrentLocation = shareCurrentLocation;
+
+    function updateClock() {
+      const formatted = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date());
+      setText('currentTime', `${formatted} IST`);
+    }
+
+    function htmlIcon(className) { return L.divIcon({ className: 'bg-transparent border-0', html: `<div class="${className}"></div>`, iconSize: [24,24], iconAnchor: [12,12] }); }
+
+    function initMap() {
+      state.map = L.map('map', { zoomControl: true, preferCanvas: true, wheelPxPerZoomLevel: 90, zoomSnap: 0.5, zoomDelta: 0.5 }).setView(state.userLatLng, 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', keepBuffer: 8, updateWhenIdle: true }).addTo(state.map);
+      state.markerCluster = L.markerClusterGroup({ showCoverageOnHover: false, spiderfyOnMaxZoom: true, chunkedLoading: true, maxClusterRadius: 40 });
+      state.map.addLayer(state.markerCluster);
+      state.userMarker = L.marker(state.userLatLng, { icon: htmlIcon('user-marker') }).addTo(state.map).bindPopup(getUserPopupHtml());
+      renderSafeMarkers();
+      renderNearbyUsers();
+      refreshIncidents(false);
+    }
+
+    function getDistanceKm(lat1, lon1, lat2, lon2) { const R = 6371; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180; const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(a)); }
+
+    function renderSafeMarkers() {
+      state.safeMarkers.forEach(marker => state.map.removeLayer(marker));
+      state.safeMarkers = state.safePlaces.map(place => {
+        const dist = getDistanceKm(state.userLatLng[0], state.userLatLng[1], place.lat, place.lng).toFixed(1); const marker = L.marker([place.lat, place.lng], { icon: htmlIcon('safe-marker') }).addTo(state.map).bindPopup(`<b>${place.name}</b><br>${t('importantPlace')}<br>${dist} km away<br><a href="https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}" target="_blank">Navigate</a>`);
+        return marker;
+      });
+    }
+
+
+    function renderNearbyUsers() {
+      state.nearbyUserMarkers.forEach(marker => state.map.removeLayer(marker));
+      state.nearbyUserMarkers = state.nearbyUsers.map(user => {
+        const marker = L.marker([user.lat, user.lng], { icon: htmlIcon('user-marker') }).addTo(state.map).bindPopup(`<b>${user.name}</b><br>${t('liveArea')}`);
+        return marker;
+      });
+      setText('nearbyUsersCount', `${state.nearbyUsers.length} online`);
+    }
+
+    function jitter(value, amount = 0.0025) { return value + ((Math.random() - 0.5) * amount); }
+
+    function refreshIncidents(showNotification = true) {
+      state.markerCluster.clearLayers();
+      state.alertCircles.forEach(circle => state.map.removeLayer(circle));
+      state.alertCircles = [];
+      state.riskZones.forEach(circle => state.map.removeLayer(circle));
+      state.riskZones = [];
+      const showIncidents = document.getElementById('filterIncidents')?.checked ?? true;
+      const showAlerts = document.getElementById('filterAlerts')?.checked ?? true;
+      const showSafePlaces = document.getElementById('filterSafePlaces')?.checked ?? true;
+      state.liveIncidents = baseIncidents.map((incident, index) => ({ ...incident, lat: jitter(incident.lat, state.lowNetworkMode ? 0.002 : 0.004), lng: jitter(incident.lng, state.lowNetworkMode ? 0.002 : 0.004), time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) }));
+      state.nearbyUsers = state.nearbyUsers.map(user => ({ ...user, lat: jitter(user.lat, state.lowNetworkMode ? 0.0006 : 0.0012), lng: jitter(user.lng, state.lowNetworkMode ? 0.0006 : 0.0012) }));
+      renderNearbyUsers();
+      state.incidentMarkers = state.liveIncidents.map(item => {
+        const iconClass = item.type === 'crime' ? 'alert-marker' : item.type === 'fire' ? 'incident-marker' : item.type === 'medical' ? 'safe-marker' : 'incident-marker';
+        const marker = L.marker([item.lat, item.lng], { icon: htmlIcon(iconClass) });
+        marker.bindPopup(`<b>${item.title}</b><br>${item.description}<br>Type: ${item.type}<br>Severity: ${item.severity}<br>Time: ${item.time}`);
+        if (showIncidents) state.markerCluster.addLayer(marker);
+        if (showAlerts && item.severity === 'high') { const circle = L.circle([item.lat, item.lng], { radius: 450, color: '#ff4d4f', fillColor: '#ff4d4f', fillOpacity: 0.12 }).addTo(state.map); state.alertCircles.push(circle); }
+        const risk = L.circle([item.lat, item.lng], { radius: item.severity === 'high' ? 650 : 380, color: item.severity === 'high' ? '#f97316' : '#facc15', fillColor: item.severity === 'high' ? '#f97316' : '#facc15', fillOpacity: 0.08, weight: 1 }).addTo(state.map); state.riskZones.push(risk);
+        return marker;
+      });
+      if (!showSafePlaces) { state.safeMarkers.forEach(marker => state.map.removeLayer(marker)); } else { renderSafeMarkers(); }
+      renderAreaCards();
+      renderFeed();
+      updateAiSuggestion();
+      if (showNotification && state.notificationsEnabled && document.getElementById('notificationToggle').checked) {
+        notifyUser(state.liveIncidents[0]?.title || t('notificationTraffic'), t('routeSuggestion'));
+      }
+    }
+
+    function renderAreaCards() {
+      const grid = document.getElementById('areaGrid');
+      grid.innerHTML = state.liveIncidents.map(item => `
+        <article class="rounded-2xl border border-white/10 bg-slate-950/60 p-5 transition hover:border-red-400/30 hover:bg-slate-950/75">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.24em] text-slate-500">${t('liveArea')}</p>
+              <h4 class="mt-2 text-lg font-bold">${item.title}</h4>
+            </div>
+            <span class="rounded-full px-3 py-1 text-xs font-semibold ${item.severity === 'high' ? 'bg-red-500/15 text-red-200' : item.severity === 'medium' ? 'bg-amber-500/15 text-amber-200' : 'bg-sky-500/15 text-sky-200'}">${item.time}</span>
+          </div>
+          <div class="mt-4 flex items-center gap-2 text-sm text-slate-300">
+            <span class="h-2.5 w-2.5 rounded-full ${item.severity === 'high' ? 'bg-red-300' : item.severity === 'medium' ? 'bg-amber-300' : 'bg-sky-300'}"></span>
+            <span>${t(item.type) || item.type}</span>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    function renderFeed() {
+      const items = [
+        `${t('notificationIncident')}`,
+        `${t('notificationTraffic')}`,
+        `${t('routeSuggestion')}`,
+        `${state.watchMode ? t('watchEnabledHint') : t('watchDisabledHint')}`,
+        `${t('nearbyUsersHint')}`
+      ];
+      document.getElementById('eventFeed').innerHTML = items.map((item, index) => `<div class="rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-sm text-slate-300"><div class="mb-2 text-xs uppercase tracking-[0.24em] text-slate-500">${t('aiPanelLabel')} ${index + 1}</div>${item}</div>`).join('');
+    }
+
+    function updateAiSuggestion() {
+      const top = state.liveIncidents.find(i => i.type === 'accident') || state.liveIncidents[0];
+      if (top) setText('aiSuggestionText', `${t('routeSuggestion')} ${top.title}.`);
+    }
+
+    function saveNumbers() { localStorage.setItem(contactsKey, JSON.stringify(subscribedNumbers)); }
+    function loadNumbers() {
+      try { subscribedNumbers = JSON.parse(localStorage.getItem(contactsKey) || '[]'); }
+      catch { subscribedNumbers = []; }
+      renderContacts();
+    }
+
+    function renderContacts() {
+      const contactList = document.getElementById('contactList');
+      if (!subscribedNumbers.length) {
+        contactList.innerHTML = `<div class="rounded-2xl border border-dashed border-white/15 bg-slate-950/35 p-5 text-sm text-slate-400">${t('emptyContacts')}</div>`;
+        return;
+      }
+      contactList.innerHTML = subscribedNumbers.map((num, index) => `
+        <div class="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4">
+          <div><p class="text-xs uppercase tracking-[0.24em] text-slate-500">${t('contactCardLabel')} ${index + 1}</p><p class="mt-1 text-lg font-semibold">+91 ${num}</p></div>
+          <div class="flex gap-2">
+            <button class="rounded-xl border border-green-400/25 bg-green-500/10 px-4 py-2 text-sm font-semibold text-green-100 transition hover:bg-green-500/20" onclick="sendSmsToNumber('${num}')">${t('sendSms')}</button>
+            <button class="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-500/20" onclick="removeNumber(${index})">${t('remove')}</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function updateCountdownUI() {
+      const mins = String(Math.floor(countdown / 60)).padStart(2, '0');
+      const secs = String(countdown % 60).padStart(2, '0');
+      setText('countMin', mins); setText('countSec', secs); setText('overlayCountdown', `${mins}:${secs}`);
+      const active = document.body.classList.contains('alert-live');
+      const statusEl = document.getElementById('countStatus');
+      statusEl.textContent = active ? t('live') : t('ok');
+      statusEl.className = `text-4xl font-extrabold ${active ? 'text-red-200' : 'text-emerald-300'}`;
+    }
+
+    function currentAlertMessage() { return t('alertMessage'); }
+    function openSmsLink(number) { window.location.href = `sms:+91${number}?body=${encodeURIComponent(currentAlertMessage())}`; }
+    function sendSmsToNumber(number) { openSmsLink(number); }
+    window.sendSmsToNumber = sendSmsToNumber;
+
+    function sendDirectAlert() {
+      const input = document.getElementById('directSmsInput');
+      const number = input.value.trim();
+      if (!/^\d{10}$/.test(number)) return window.alert(t('invalidDirectPhone'));
+      setText('smsModeTitle', `+91 ${number}`);
+      setText('smsModeHint', currentAlertMessage());
+      openSmsLink(number);
+    }
+
+    function sendAlertToAll() {
+      if (!subscribedNumbers.length) return window.alert(t('noContactsSend'));
+      const first = subscribedNumbers[0];
+      setText('smsModeTitle', `${subscribedNumbers.length} users`);
+      setText('smsModeHint', subscribedNumbers.map(n => `+91 ${n}`).join(', '));
+      openSmsLink(first);
+      if (navigator.share) navigator.share({ text: `${currentAlertMessage()}\n\nRecipients: ${subscribedNumbers.join(', ')}` }).catch(() => {});
+    }
+
+    function copyAlertMessage() {
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(currentAlertMessage()).then(() => window.alert(t('copied'))).catch(() => window.alert(t('copyFailed')));
+      else window.alert(t('copyFailed'));
+    }
+
+    function scheduleStatusCards() {
+      const statusList = document.getElementById('statusList');
+      const smsButtonList = document.getElementById('smsButtonList');
+      statusList.innerHTML = ''; smsButtonList.innerHTML = '';
+      if (!subscribedNumbers.length) {
+        statusList.innerHTML = `<div class="rounded-2xl border border-dashed border-white/10 bg-slate-900/60 p-4 text-sm text-slate-400">${t('noContactsQueue')}</div>`;
+        smsButtonList.innerHTML = `<div class="rounded-2xl border border-dashed border-white/10 bg-slate-900/60 p-4 text-sm text-slate-400">${t('noSmsActions')}</div>`;
+        return;
+      }
+      subscribedNumbers.forEach((num, index) => {
+        const card = document.createElement('div');
+        card.className = 'rounded-2xl border border-white/10 bg-slate-900/65 p-4';
+        card.innerHTML = `<div class="flex items-center justify-between gap-4"><div><p class="text-xs uppercase tracking-[0.24em] text-slate-500">${t('householdContact')}</p><p class="mt-1 text-lg font-semibold">+91 ${num}</p><p id="status-${index}" class="mt-2 text-sm text-amber-200">${t('queueing')}</p></div><div id="icon-${index}" class="text-2xl">⏳</div></div>`;
+        statusList.appendChild(card);
+        setTimeout(() => { const status = document.getElementById(`status-${index}`); const icon = document.getElementById(`icon-${index}`); if (status && icon) { status.textContent = t('dispatching'); icon.textContent = '📤'; } }, 300 + index * 250);
+        setTimeout(() => { const status = document.getElementById(`status-${index}`); const icon = document.getElementById(`icon-${index}`); if (status && icon) { status.textContent = t('draftPrepared'); icon.textContent = '📱'; } }, 1100 + index * 350);
+        const button = document.createElement('button');
+        button.className = 'flex w-full items-center justify-between rounded-2xl border border-green-400/30 bg-green-500/10 px-4 py-4 text-left transition hover:bg-green-500/15';
+        button.innerHTML = `<div><p class="text-xs uppercase tracking-[0.24em] text-green-100/70">${t('sendSms')}</p><p class="mt-1 text-lg font-semibold text-green-100">+91 ${num}</p></div><span class="text-2xl">📱</span>`;
+        button.addEventListener('click', () => sendSmsToNumber(num));
+        smsButtonList.appendChild(button);
+      });
+    }
+
+    function addMobileNumber() {
+      const input = document.getElementById('mobileInput');
+      const num = input.value.trim();
+      if (!/^\d{10}$/.test(num)) return window.alert(t('invalidPhone'));
+      if (subscribedNumbers.includes(num)) return window.alert(t('duplicatePhone'));
+      subscribedNumbers.push(num); saveNumbers(); input.value = ''; renderContacts(); scheduleStatusCards();
+    }
+    function removeNumber(index) { subscribedNumbers.splice(index, 1); saveNumbers(); renderContacts(); scheduleStatusCards(); }
+    window.removeNumber = removeNumber;
+
+    function startSiren() {
+      if (audioContext) return;
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      sirenOscillator = audioContext.createOscillator();
+      sirenLfo = audioContext.createOscillator();
+      const sirenGain = audioContext.createGain();
+      const lfoGain = audioContext.createGain();
+      sirenOscillator.type = 'sawtooth'; sirenOscillator.frequency.value = 520; sirenGain.gain.value = 0.08;
+      sirenLfo.type = 'sine'; sirenLfo.frequency.value = 1.5; lfoGain.gain.value = 220;
+      sirenLfo.connect(lfoGain); lfoGain.connect(sirenOscillator.frequency); sirenOscillator.connect(sirenGain); sirenGain.connect(audioContext.destination);
+      sirenOscillator.start(); sirenLfo.start();
+    }
+
+    function stopSiren() {
+      if (sirenOscillator) { sirenOscillator.stop(); sirenOscillator.disconnect(); sirenOscillator = null; }
+      if (sirenLfo) { sirenLfo.stop(); sirenLfo.disconnect(); sirenLfo = null; }
+      if (audioContext) { audioContext.close(); audioContext = null; }
+    }
+
+    function notifyUser(title, body) {
+      if (!state.notificationsEnabled || !document.getElementById('notificationToggle').checked) return;
+      if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body, tag: 'bharat-shield-watch' });
+    }
+
+    function updateWatchUi() {
+      setText('watchModeState', state.watchMode ? t('enabled') : t('disabled'));
+      setText('notificationModeState', state.notificationsEnabled ? t('enabled') : t('disabled'));
+      setText('watchModeHint', state.watchMode ? t('watchEnabledHint') : t('watchDisabledHint'));
+      document.getElementById('watchModeState').className = `mt-2 text-lg font-bold ${state.watchMode ? 'text-emerald-300' : 'text-slate-400'}`;
+      document.getElementById('notificationModeState').className = `mt-2 text-lg font-bold ${state.notificationsEnabled ? 'text-emerald-300' : 'text-slate-400'}`;
+      document.getElementById('networkModeToggle').checked = state.lowNetworkMode;
+    }
+
+    function addAlertMarker() {
+      if (state.alertMarker) state.map.removeLayer(state.alertMarker);
+      state.alertMarker = L.marker(state.userLatLng, { icon: htmlIcon('alert-marker') }).addTo(state.map)
+        .bindPopup(`<b>${t('alertMarkerTitle')}</b><br>${t('alertDetails')}${new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date())}<br>${state.userLatLng[0].toFixed(3)}, ${state.userLatLng[1].toFixed(3)}`)
+        .openPopup();
+    }
+
+    function removeAlertMarker() {
+      if (state.alertMarker) { state.map.removeLayer(state.alertMarker); state.alertMarker = null; }
+    }
+
+    function startAlert() {
+      document.body.classList.add('alert-live');
+      setText('systemStatus', t('active')); setText('alertState', t('shelterNow')); setText('alertStateHint', t('overlayInstructionText'));
+      countdown = 45; updateCountdownUI(); scheduleStatusCards(); startSiren(); addAlertMarker();
+      if (navigator.vibrate) navigator.vibrate([500,200,500,200,700]);
+      notifyUser(t('notificationAlert'), `${currentAlertMessage()} ${state.nearbyUsers.length} nearby users notified.`);
+      setText('nearbyUsersHint', `${state.nearbyUsers.length} nearby users received simulated live emergency broadcast updates.`);
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => { if (countdown > 0) countdown -= 1; updateCountdownUI(); }, 1000);
+    }
+
+    function stopAlert() {
+      document.body.classList.remove('alert-live');
+      setText('systemStatus', t('routine')); setText('alertState', t('noWarning')); setText('alertStateHint', t('routineHint')); countdown = 45; updateCountdownUI(); removeAlertMarker(); stopSiren();
+      if (countdownTimer) clearInterval(countdownTimer);
+    }
+
+    function updateUserLocation(lat, lng, pan = false) {
+      state.userLatLng = [lat, lng];
+      setText('locationText', `${lat.toFixed(2)}°N, ${lng.toFixed(2)}°E`);
+      if (state.userMarker) { state.userMarker.setLatLng(state.userLatLng); state.userMarker.setPopupContent(getUserPopupHtml()); }
+      if (pan && state.map) state.map.panTo(state.userLatLng, { animate: true, duration: 0.8 });
+      if (state.alertMarker) state.alertMarker.setLatLng(state.userLatLng);
+    }
+
+    function getLocation() {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition((position) => {
+        updateUserLocation(position.coords.latitude, position.coords.longitude, true);
+      });
+      navigator.geolocation.watchPosition((position) => {
+        updateUserLocation(position.coords.latitude, position.coords.longitude, false);
+      }, () => {}, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+    }
+
+    function simulateWatchTick() {
+      if (!state.watchMode) return;
+      updateUserLocation(jitter(state.userLatLng[0], state.lowNetworkMode ? 0.0004 : 0.001), jitter(state.userLatLng[1], state.lowNetworkMode ? 0.0004 : 0.001), false);
+      refreshIncidents(true);
+      if (document.hidden && state.notificationsEnabled) notifyUser(t('notificationTraffic'), t('routeSuggestion'));
+    }
+
+    async function searchLocation() { const q = document.getElementById('locationSearchInput').value.trim(); if (!q) return; try { const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}`); const data = await res.json(); if (data[0]) { const lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon); updateUserLocation(lat, lon, true); state.map.setView([lat, lon], 13); } } catch (e) {} }
+
+    function requestVoiceAlert() { const msg = new SpeechSynthesisUtterance('Emergency alert. Move to the nearest safe place immediately.'); msg.rate = 1; speechSynthesis.cancel(); speechSynthesis.speak(msg); }
+
+    function triggerSOS() { const coords = `${state.userLatLng[0].toFixed(5)}, ${state.userLatLng[1].toFixed(5)}`; const message = `SOS! I need help. My current location is ${coords}`; if (subscribedNumbers.length) { window.location.href = `sms:+91${subscribedNumbers[0]}?body=${encodeURIComponent(message)}`; } else if (navigator.share) { navigator.share({ text: message }).catch(() => {}); } else { navigator.clipboard?.writeText(message); } }
+
+    function applyTranslations() {
+      Object.entries(textTargets).forEach(([id, key]) => setText(id, t(key)));
+      document.documentElement.lang = currentLanguage; document.documentElement.dir = currentLanguage === 'he' ? 'rtl' : 'ltr';
+      setText('systemStatus', document.body.classList.contains('alert-live') ? t('active') : t('routine'));
+      setText('alertState', document.body.classList.contains('alert-live') ? t('shelterNow') : t('noWarning'));
+      setText('alertStateHint', document.body.classList.contains('alert-live') ? t('overlayInstructionText') : t('routineHint'));
+      setText('smsModeTitle', t('monitoring')); setText('smsModeHint', t('insightHint'));
+      updateWatchUi(); renderContacts(); renderAreaCards(); renderFeed(); renderSafeMarkers(); renderNearbyUsers(); scheduleStatusCards(); updateAiSuggestion(); updateCountdownUI();
+    }
+
+    document.getElementById('languageSelect').value = currentLanguage;
+    document.getElementById('languageSelect').addEventListener('change', (event) => { currentLanguage = event.target.value; localStorage.setItem(langKey, currentLanguage); applyTranslations(); });
+    document.getElementById('themeToggle').addEventListener('change', (event) => { document.body.classList.toggle('light-mode', !event.target.checked); });
+    document.getElementById('watchModeToggle').addEventListener('change', (event) => { state.watchMode = event.target.checked; updateWatchUi(); renderFeed(); });
+    document.getElementById('notificationToggle').addEventListener('change', (event) => { state.notificationsEnabled = event.target.checked; updateWatchUi(); });
+    document.getElementById('networkModeToggle').addEventListener('change', (event) => {
+      state.lowNetworkMode = event.target.checked;
+      if (watchTimer) clearInterval(watchTimer);
+      watchTimer = setInterval(simulateWatchTick, state.lowNetworkMode ? 12000 : 6500);
+      setText('smsModeHint', state.lowNetworkMode ? 'Low-bandwidth map refresh enabled.' : t('insightHint'));
+    });
+    document.getElementById('triggerButton').addEventListener('click', startAlert);
+    document.getElementById('stopButton').addEventListener('click', stopAlert);
+    document.getElementById('sendPrimaryButton').addEventListener('click', sendAlertToAll);
+    document.getElementById('overlayStopButton').addEventListener('click', stopAlert);
+    document.getElementById('overlaySendAllButton').addEventListener('click', sendAlertToAll);
+    document.getElementById('sendDirectSmsButton').addEventListener('click', sendDirectAlert);
+    document.getElementById('sendAllSmsButton').addEventListener('click', sendAlertToAll);
+    document.getElementById('copySmsButton').addEventListener('click', copyAlertMessage);
+    document.getElementById('locationSearchButton').addEventListener('click', searchLocation);
+    document.getElementById('locationSearchInput').addEventListener('keydown', (event) => { if (event.key === 'Enter') searchLocation(); });
+    document.getElementById('filterIncidents').addEventListener('change', () => refreshIncidents(false));
+    document.getElementById('filterAlerts').addEventListener('change', () => refreshIncidents(false));
+    document.getElementById('filterSafePlaces').addEventListener('change', () => refreshIncidents(false));
+    document.getElementById('sosButton').addEventListener('click', triggerSOS);
+    document.getElementById('voiceAlertButton').addEventListener('click', requestVoiceAlert);
+    document.getElementById('addButton').addEventListener('click', addMobileNumber);
+    document.getElementById('mobileInput').addEventListener('keydown', (event) => { if (event.key === 'Enter') addMobileNumber(); });
+    document.getElementById('directSmsInput').addEventListener('keydown', (event) => { if (event.key === 'Enter') sendDirectAlert(); });
+    document.addEventListener('keydown', (event) => { if (event.key.toLowerCase() === 'r') startAlert(); if (event.key === 'Escape') stopAlert(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && state.watchMode) refreshIncidents(false); });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+
+    loadNumbers();
+    updateClock();
+    initMap();
+    document.getElementById('allowLocationButton').addEventListener('click', () => { state.locationAllowed = true; document.getElementById('permissionModal').style.display = 'none'; getLocation(); });
+    document.getElementById('denyLocationButton').addEventListener('click', () => { state.locationAllowed = false; document.getElementById('permissionModal').style.display = 'none'; document.getElementById('locationSearchInput').focus(); });
+    refreshIncidents(false);
+    scheduleStatusCards();
+    updateCountdownUI();
+    updateWatchUi();
+    applyTranslations();
+    setInterval(updateClock, 1000);
+    watchTimer = setInterval(simulateWatchTick, 6500);
+  </script>
+</body>
+</html>
